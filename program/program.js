@@ -1,4 +1,4 @@
-import { spawn } from "child_process";
+import { spawn, exec } from "child_process";
 import reviewCheck from "./utils/reviewcheck.js";
 import dotenv from "dotenv";
 
@@ -34,172 +34,202 @@ const store_patton =
 // const AD_stop =
 //   /\[0x[0-9a-fA-F]+\] invalidated because the current process cancelled the connection by calling xpc_connection_cancel\(\)/;   /// 광고프로세스 취소 로그가 아니엿음
 
-const logCheck = spawn("idevicesyslog");
+const StartProgram = () => {
+  const logCheck = spawn("idevicesyslog");
 
-const state = new Proxy(
-  {
-    isConnect: false,
-    isRecording: false,
-    isProcessing: false,
-    recordComplete: false,
-  },
-  {
-    set(target, property, value) {
-      if (target[property] !== value) {
-        console.log("State:", {
-          property,
-          value: value,
-        });
-      }
-      target[property] = value;
-      return true;
+  const state = new Proxy(
+    {
+      isConnect: false,
+      isRecording: false,
+      isProcessing: false,
+      recordComplete: false,
     },
-  }
-);
+    {
+      set(target, property, value) {
+        if (target[property] !== value) {
+          console.log("State:", {
+            property,
+            value: value,
+          });
+        }
+        target[property] = value;
+        return true;
+      },
+    }
+  );
 
-const storedata = new Proxy(
-  {
-    storeId: "",
-  },
-  {
-    set(target, property, value) {
-      if (target[property] !== value) {
-        console.log("StoreID:", {
-          property,
-          value: value,
-        });
-      }
-      target[property] = value;
-      return true;
+  const storedata = new Proxy(
+    {
+      storeId: "",
     },
-  }
-);
-
-let recordtime = null;
-let lastlogtime = Date.now();
-const checkConnectionInterval = setInterval(() => {
-  if (Date.now() - lastlogtime > 2000) {
-    state.isConnect = false;
-    console.log("로그정보가 없습니다. 휴대폰 연결을 확인하세요");
-  }
-}, 5000);
-
-logCheck.stdout.on("data", (data) => {
-  lastlogtime = Date.now();
-  const log = data.toString();
-
-  if (log) {
-    if (!state.isConnect) {
-      state.isConnect = true;
-    }
-  }
-  // if (AD_stop.test(log)) {
-  //   // state.isRecording = false;
-  //   // state.isProcessing = false;
-  //   // storedata.storeId = "";
-  //   // if (recordtime) {
-  //   //   clearTimeout(recordtime);
-  //   //   recordtime = null;
-  //   // }
-  //   console.log("stop");
-  // }
-
-  if (store_patton.test(log)) {
-    const startpoint = log.indexOf("/apps/") + 6;
-    const endpoint = log.indexOf("?");
-    const id = log.slice(startpoint, endpoint);
-    storedata["storeId"] = id;
-  }
-
-  if (
-    AD_patton.test(log) ||
-    AD_patton2.test(log) ||
-    AD_patton3.test(log) ||
-    AD_patton4.test(log) ||
-    AD_Patton5.test(log)
-  ) {
-    if (!state.isProcessing && !state.isRecording) {
-      state.storeId = "";
-      startRecord();
-      state.isRecording = true;
-    }
-    if (!recordtime) {
-      recordtime = setTimeout(() => {
-        if (storedata.storeId !== "") {
-          stopRecord();
-          state.isRecording = false;
-          CheckDBandFilesave();
-        } else {
-          console.error("not store_ID");
-          closeRecord();
-          state.isRecording = false;
+    {
+      set(target, property, value) {
+        if (target[property] !== value) {
+          console.log("StoreID:", {
+            property,
+            value: value,
+          });
         }
-        recordtime = null;
-      }, 30000);
+        target[property] = value;
+        return true;
+      },
     }
-  }
-});
+  );
 
-const CheckDBandFilesave = async () => {
-  if (state.isProcessing == true) return;
+  let recordtime = null;
 
-  state.isProcessing = true;
-
-  try {
-    console.log("check");
-    const { data } = await api.get(`/list/${storedata.storeId}`);
-    if (!data.find) {
-      console.log("start");
-
-      const First_Filter = await reviewCheck(storedata.storeId);
-
-      console.log(First_Filter);
-
-      if (!First_Filter.Ad_result) {
-        console.log("광고 점수 이상");
-
-        const VideoSave = saveRecord();
-        console.log(VideoSave);
-
-        const Second_Filter = await VideoCheck(VideoSave.path, VideoSave.name);
-
-        if (Second_Filter) {
-          console.log("영상 문제없음");
-        } else {
-          console.log("문제영상 정보 DB로 전송");
-          if (storedata.storeId && First_Filter.title && VideoSave.path) {
-            const upload = await api.post("list", {
-              appid: storedata.storeId,
-              videoname: First_Filter.title,
-              filepath: VideoSave.path,
-            });
-
-            console.log(upload.upload);
-          } else {
-            console.error("요청 바디가 준비되지 않았습니다.");
-          }
+  let lastlogtime = Date.now();
+  const checkConnectionInterval = setInterval(() => {
+    if (Date.now() - lastlogtime > 2000) {
+      exec("idevice_id -l", (error, stdout) => {
+        if (error || !stdout.trim()) {
+          console.log("❌ iOS 기기 연결 끊김.");
+          state.isConnect = false;
         }
-      } else if (First_Filter) {
-        console.log("광고 점수 양호");
+      });
+    }
+  }, 5000);
+
+  logCheck.stdout.setEncoding("utf8");
+
+  logCheck.stdout.on("data", (data) => {
+    lastlogtime = Date.now();
+    const log = data.toString();
+
+    if (log) {
+      if (!state.isConnect) {
+        state.isConnect = true;
+      }
+    }
+    // if (AD_stop.test(log)) {
+    //   // state.isRecording = false;
+    //   // state.isProcessing = false;
+    //   // storedata.storeId = "";
+    //   // if (recordtime) {
+    //   //   clearTimeout(recordtime);
+    //   //   recordtime = null;
+    //   // }
+    //   console.log("stop");
+    // }
+    if (store_patton.test(log)) {
+      const startpoint = log.indexOf("/apps/") + 6;
+      const endpoint = log.indexOf("?");
+      const id = log.slice(startpoint, endpoint);
+      if (!state.isProcessing) {
+        storedata["storeId"] = id;
+      }
+    }
+
+    if (
+      AD_patton.test(log) ||
+      AD_patton2.test(log) ||
+      AD_patton3.test(log) ||
+      AD_patton4.test(log) ||
+      AD_Patton5.test(log)
+    ) {
+      if (!state.isProcessing && !state.isRecording) {
+        state.storeId = "";
+        startRecord();
+        state.isRecording = true;
+      }
+
+      if (!state.isConnect) {
+        console.log("close recoding");
         closeRecord();
+        state.isRecording = false;
+        return;
+      }
+
+      if (!recordtime) {
+        recordtime = setTimeout(() => {
+          if (storedata.storeId !== "") {
+            stopRecord();
+            state.isRecording = false;
+            CheckDBandFilesave();
+          } else {
+            console.error("not store_ID");
+            closeRecord();
+            state.isRecording = false;
+          }
+          recordtime = null;
+        }, 20000);
       }
     }
-  } catch (error) {
-    console.error(error);
-  } finally {
-    state.isProcessing = false;
-    storedata.storeId = "";
-  }
+  });
+
+  logCheck.on("close", (code) => {
+    console.log(`🚨 idevicesyslog 종료됨 (코드: ${code}). 3초 후 재시작.`);
+    setTimeout(StartProgram, 3000);
+  });
+
+  const CheckDBandFilesave = async () => {
+    if (state.isProcessing == true) return;
+
+    state.isProcessing = true;
+
+    try {
+      console.log("list check");
+      const { data } = await api.get(`/list/${storedata.storeId}`);
+      if (!data.find) {
+        const First_Filter = await reviewCheck(storedata.storeId);
+
+        console.log(First_Filter);
+
+        if (!First_Filter.Ad_result) {
+          console.log("광고 점수 이상");
+
+          const VideoSave = await saveRecord();
+          const path = VideoSave.slice(
+            VideoSave.indexOf("/User"),
+            VideoSave.indexOf(",")
+          );
+          const Second_Filter = await VideoCheck(path);
+
+          if (Second_Filter) {
+            console.log("영상 문제없음");
+          } else {
+            console.log("문제영상 정보 DB로 전송");
+            if (storedata.storeId && First_Filter.title && path) {
+              const upload = await api.post("list", {
+                appid: storedata.storeId,
+                videoname: First_Filter.title,
+                filepath: VideoSave.path,
+              });
+
+              console.log(upload.upload);
+            } else {
+              console.error("요청 바디가 준비되지 않았습니다.");
+            }
+          }
+        } else if (First_Filter) {
+          console.log("광고 점수 양호");
+          closeRecord();
+        }
+      }
+    } catch (error) {
+      console.error(error);
+    } finally {
+      state.isProcessing = false;
+      storedata.storeId = "";
+    }
+  };
+
+  process.on("exit", () => {
+    clearInterval(checkConnectionInterval);
+  });
+
+  // const test = async () => {
+  //   const result = await reviewCheck(6448786147);
+  //   console.log(result);
+  // };
+  // test();
+
+  // const data =
+  //   "file save: «class ppth»:/Users/idongchan/Desktop/pj/AD_crawler/program/utils/video/adRecord_20250221_130536.mov, name:adRecord_20250221_130536.mov";
+  // const path = data.slice(data.indexOf("/User"), data.indexOf(","));
+  // const name = data.slice(data.indexOf("adRecord"));
+  // console.log(path);
+  // console.log(name);
 };
 
-process.on("exit", () => {
-  clearInterval(checkConnectionInterval);
-});
-//https://itunes.apple.com/kr/rss/customerreviews/id=963067330/json
-
-// const test = async () => {
-//   const data = await reviewCheck(1105855019);
-//   console.log(data);
-// };
-
-// test();
+StartProgram();

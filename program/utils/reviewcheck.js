@@ -2,88 +2,70 @@ import axios from "axios";
 import puppeteer from "puppeteer";
 
 const reviewCheck = async (id) => {
-  const siteURL = `https://apps.apple.com/kr/app/${id}?`;
+  const siteURL = `https://apps.apple.com/kr/app/${id}?see-all=reviews`;
 
   const browser = await puppeteer.launch({ headless: true });
   const page = await browser.newPage();
-  await page.goto(siteURL);
 
-  // const reviews = await page.evaluate(() => {
-  //   const textelements = document.querySelectorAll(
-  //     ".we-truncate.we-truncate--multi-line.we-truncate--interactive.we-truncate--truncated.we-customer-review__body"
-  //   );
+  await page.goto(siteURL, { waitUntil: "networkidle2", timeout: 60000 });
 
-  //   // // 필터링 보완 필요
+  const selector = ".see-all-header__link.link";
 
-  //   return Array.from(textelements).map((element, idx) => {
-  //     let content = element.textContent
-  //       .replace(/\s*더 보기\s*$/, "")
-  //       .replace(/[\n\s]+/g, " ")
-  //       .trim();
+  await page.waitForSelector(selector, { timeout: 5000 });
 
-  //     //   let badScore = 0;
-  //     //   const match = filterWord.test(content);
-  //     //   if (match) {
-  //     //     badScore += 1;
-  //     //   }
-  //     //   return badScore;
-  //     return content;
-
-  //   });
-  // });
-  await page.waitForSelector("h1");
-
-  const Title = await page.evaluate(() => {
-    const h1 = document.querySelector("h1");
-    if (h1) {
-      const data = h1.textContent.replace(/[\n\s]+/g, " ").trim();
-      const endpoint = data.indexOf("+") - 2;
-      return data.slice(0, endpoint);
-    } else {
-      console.log("not fount title");
-    }
-  });
+  const Title = await page.$eval(selector, (el) => el.textContent.trim());
 
   await browser.close();
 
-  // const score = reviews.reduce((a, b) => a + b, 0);
+  // 앱스토어 이동 alert 문제로 오류 발생
 
-  // if (score > 1) {
-  //   return 0;
-  // } else {
-  //   return 1;
-  // }
+  const reviews = [];
+  for (let i = 1; i < 10; i++) {
+    const reviewapi = await axios.get(
+      `https://itunes.apple.com/kr/rss/customerreviews/page=${i}/id=${id}/json`
+    );
+    const data = reviewapi.data;
 
-  const reviewapi = await axios.get(
-    `https://itunes.apple.com/kr/rss/customerreviews/id=${id}/json`
-  );
-
-  const data = reviewapi.data;
-
-  const reviews = data.feed.entry.map((item) => {
-    return item.content.label.replace(/[\n]+/g, " ");
-  });
+    if (!data.feed || !data.feed.entry) {
+      console.log(`last Page ${i}`);
+      break;
+    }
+    const Review = data.feed.entry.map((item) => {
+      return item.content.label.replace(/[\n]+/g, " ");
+    });
+    reviews.push(...Review);
+  }
 
   const filterWord = [
+    "사기 게임",
+    "구라",
     "낚시",
     "허위",
+    "사기",
+    "양산형",
+    "중국산",
+    "쓰레기 게임",
     "사기 광고",
     "과장 광고",
     "낚시 광고",
-    "광고랑 전혀 다름",
+    "광고랑 다름",
     "가짜 게임",
-    "광고랑 다른 게임",
+    "가짜게임",
+    "사기 게임",
+    "광고랑 다른게임",
   ];
 
   let ADscore = 0;
 
   reviews.forEach((item) => {
     const match = filterWord.some((keyword) => item.includes(keyword));
+
     if (match) {
       ++ADscore;
     }
   });
 
+  console.log(ADscore);
   if (ADscore < 5) {
     return { title: Title, Ad_result: true };
   } else {

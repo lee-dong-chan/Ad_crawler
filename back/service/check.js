@@ -16,6 +16,6 @@ export default async (req, res) => {
       return res.json({ find: false });
     }
   } catch (err) {
-    return res.status(500).json({ message: "서버 오류", error: err.message });
+    return res.status(500).json({ message: "서버 오류" });
   }
 };
